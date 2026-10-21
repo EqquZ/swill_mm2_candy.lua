@@ -1,5 +1,5 @@
 --[[
-    EasyAutoFarm by klx (V16 - True Fly-Through Collection)
+    EasyAutoFarm by klx (V17 - Continuous Fly-Through)
 ]]
 
 local Players = game:GetService("Players")
@@ -228,52 +228,12 @@ local function getClosestCandy(hrp)
     return closestCandy
 end
 
-local function flyToPart(targetPart)
-    local char, hrp, hum = getCharacter()
-    if not hrp or not targetPart or not targetPart.Parent then return false end
-    
-    enableNoclip()
-    hum.PlatformStand = true
-
-    local startTime = tick()
-    
-    while farming and targetPart and targetPart.Parent do
-        local currentChar, currentHrp = getCharacter()
-        if not currentHrp then break end
-        
-        -- Вычисляем позицию чуть выше центра конфеты, чтобы персонаж не врезался в пол
-        local targetPos = targetPart.Position + Vector3.new(0, 1.5, 0)
-        local distance = (currentHrp.Position - targetPos).Magnitude
-        
-        -- Если мы уже вплотную к конфете (меньше 1.5 стадов)
-        if distance < 1.5 then
-            -- Жестко ставим персонажа ровно на конфету
-            currentHrp.CFrame = CFrame.new(targetPos)
-            task.wait(0.1) -- Ждем, пока сервер засчитает сбор (конфета исчезнет)
-            break 
-        end
-        
-        -- Летим к цели
-        local direction = (targetPos - currentHrp.Position).Unit
-        currentHrp.CFrame = currentHrp.CFrame + (direction * FLY_SPEED * RunService.Heartbeat:Wait())
-        
-        -- Если летим больше 5 секунд (застряли), прерываем
-        if tick() - startTime > 5 then break end 
-    end
-    
-    if hrp then
-        hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-    end
-    hum.PlatformStand = false
-    disableNoclip()
-    
-    task.wait(0.05)
-    return true
-end
-
 local function farmLoop()
     local diedConnection
     local lastHum
+    local currentTarget = nil
+
+    enableNoclip()
 
     while farming do
         local char, hrp, hum = getCharacter()
@@ -286,6 +246,7 @@ local function farmLoop()
         if hum ~= lastHum then
             if diedConnection then diedConnection:Disconnect() end
             lastHum = hum
+            hum.PlatformStand = true
             diedConnection = hum.Died:Connect(function()
                 localCandyCount = 0
             end)
@@ -294,11 +255,11 @@ local function farmLoop()
         local currentCount = getRealCandyCount()
         
         if currentCount >= MAX_CANDY or localCandyCount >= MAX_CANDY then
+            hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
             if autoResetEnabled then
                 if hum and hum.Health > 0 then hum.Health = 0 end
                 task.wait(4) 
             else
-                if hrp then hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0) end
                 task.wait(1)
             end
             continue
@@ -307,15 +268,33 @@ local function farmLoop()
         local candy = getClosestCandy(hrp)
         
         if candy then
-            flyToPart(candy)
-            localCandyCount = localCandyCount + 1
-            totalCollected = totalCollected + 1 
+            -- Считаем конфету собранной, если мы сменили цель
+            if currentTarget and currentTarget ~= candy and currentTarget.Parent then
+                localCandyCount = localCandyCount + 1
+                totalCollected = totalCollected + 1
+            end
+            currentTarget = candy
+
+            -- Непрерывный полет строго к цели (с небольшим подъемом, чтобы не застрять в полу)
+            local targetPos = candy.Position + Vector3.new(0, 1.5, 0)
+            local direction = (targetPos - hrp.Position).Unit
+            
+            -- Используем CFrame для плавного полета сквозь объекты
+            local dt = RunService.Heartbeat:Wait()
+            hrp.CFrame = hrp.CFrame + (direction * FLY_SPEED * dt)
         else
-            task.wait(0.5)
+            currentTarget = nil
+            hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            RunService.Heartbeat:Wait()
         end
     end
 
     if diedConnection then diedConnection:Disconnect() end
+    if LocalPlayer.Character then
+        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum then hum.PlatformStand = false end
+    end
+    disableNoclip()
 end
 
 -- ========== GUI ЛОГИКА ==========
@@ -340,7 +319,6 @@ farmBtn.MouseButton1Click:Connect(function()
     else
         farmBtn.Text = "Auto Farm: OFF"
         farmBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-        
         disableNoclip()
         if LocalPlayer.Character then
             local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
@@ -368,4 +346,4 @@ autoResetBtn.MouseButton1Click:Connect(function()
     autoResetBtn.BackgroundColor3 = autoResetEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(100, 100, 100)
 end)
 
-print("[SWILL] V16 загружено. Fix: Fly-Through.")
+print("[SWILL] V17 загружено. Режим непрерывного полета.")

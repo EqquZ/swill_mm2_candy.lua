@@ -1,5 +1,5 @@
 --[[
-    EasyAutoFarm by klx (V14 - Classic Noclip only on Fly)
+    EasyAutoFarm by klx (V15 - Guaranteed Collection & Snap)
 ]]
 
 local Players = game:GetService("Players")
@@ -12,7 +12,7 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 local CANDY_NAMES = {"candy", "sweet", "coin", "token", "collectible"} 
 local MAX_CANDY = 50                
 local FLY_SPEED = 25                
-local SCAN_RADIUS = 150             
+local SCAN_RADIUS = 300             -- Увеличил радиус, чтобы видел больше конфет
 local ANTI_FLING_SPEED_LIMIT = 100  
 -- ==============================
 
@@ -24,9 +24,7 @@ local autoResetEnabled = false
 local localCandyCount = 0
 local totalCollected = 0            
 local lastSafePosition = nil
-local candyCooldowns = {}           
 
--- Переменная для соединения Noclip
 local noclipConnection = nil
 
 -- ========== КЛАССИЧЕСКИЙ NOCLIP ==========
@@ -48,7 +46,6 @@ local function disableNoclip()
         noclipConnection:Disconnect()
         noclipConnection = nil
     end
-    -- Возвращаем коллизию, КРОМЕ HumanoidRootPart
     if LocalPlayer.Character then
         for _, v in pairs(LocalPlayer.Character:GetDescendants()) do
             if v:IsA("BasePart") then
@@ -209,25 +206,20 @@ local function getRealCandyCount()
     return localCandyCount
 end
 
+-- Поиск строго самой ближайшей конфеты
 local function getClosestCandy(hrp)
     local closestCandy = nil
     local shortestDistance = SCAN_RADIUS 
-    local currentTime = tick()
 
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if obj:IsA("BasePart") and obj.Transparency < 1 then
             local nameLower = obj.Name:lower()
             for _, target in ipairs(CANDY_NAMES) do
                 if nameLower:find(target) then
-                    if not candyCooldowns[obj] or (currentTime - candyCooldowns[obj] > 3) then
-                        local yDiff = math.abs(hrp.Position.Y - obj.Position.Y)
-                        if yDiff <= 50 then
-                            local dist = (hrp.Position - obj.Position).Magnitude
-                            if dist < shortestDistance then
-                                shortestDistance = dist
-                                closestCandy = obj
-                            end
-                        end
+                    local dist = (hrp.Position - obj.Position).Magnitude
+                    if dist < shortestDistance then
+                        shortestDistance = dist
+                        closestCandy = obj
                     end
                     break
                 end
@@ -241,7 +233,6 @@ local function flyToPart(targetPart)
     local char, hrp, hum = getCharacter()
     if not hrp or not targetPart or not targetPart.Parent then return false end
     
-    -- ВКЛЮЧАЕМ NOCLIP СТРОГО НА ВРЕМЯ ПОЛЕТА
     enableNoclip()
     hum.PlatformStand = true
 
@@ -251,24 +242,28 @@ local function flyToPart(targetPart)
         if not currentHrp then break end
         
         local distance = (currentHrp.Position - targetPart.Position).Magnitude
-        if distance < 3 then break end
+        
+        -- Если мы подлетели близко, СНАПИМ позицию прямо в конфету для 100% сбора
+        if distance < 5 then
+            currentHrp.CFrame = CFrame.new(targetPart.Position)
+            task.wait(0.1) -- Даем серверу время засчитать сбор
+            break 
+        end
         
         local direction = (targetPart.Position - currentHrp.Position).Unit
-        
-        -- Двигаем персонажа напрямую через CFrame
         currentHrp.CFrame = currentHrp.CFrame + (direction * FLY_SPEED * RunService.Heartbeat:Wait())
         
-        if tick() - startTime > 3 then break end
+        -- Увеличил таймаут до 10 секунд, чтобы он точно долетал
+        if tick() - startTime > 10 then break end 
     end
     
-    -- ВЫКЛЮЧАЕМ NOCLIP ПОСЛЕ ПОЛЕТА
     if hrp then
         hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
     end
     hum.PlatformStand = false
     disableNoclip()
     
-    task.wait(0.1)
+    task.wait(0.05)
     return true
 end
 
@@ -289,7 +284,6 @@ local function farmLoop()
             lastHum = hum
             diedConnection = hum.Died:Connect(function()
                 localCandyCount = 0
-                candyCooldowns = {}
             end)
         end
 
@@ -310,11 +304,6 @@ local function farmLoop()
         
         if candy then
             flyToPart(candy)
-            
-            if candy and candy.Parent then
-                candyCooldowns[candy] = tick()
-            end
-            
             localCandyCount = localCandyCount + 1
             totalCollected = totalCollected + 1 
         else
@@ -343,13 +332,11 @@ farmBtn.MouseButton1Click:Connect(function()
         farmBtn.Text = "Auto Farm: ON"
         farmBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
         localCandyCount = 0 
-        candyCooldowns = {}
         task.spawn(farmLoop)
     else
         farmBtn.Text = "Auto Farm: OFF"
         farmBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
         
-        -- Принудительно выключаем Noclip и возвращаем физику
         disableNoclip()
         if LocalPlayer.Character then
             local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
@@ -377,4 +364,4 @@ autoResetBtn.MouseButton1Click:Connect(function()
     autoResetBtn.BackgroundColor3 = autoResetEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(100, 100, 100)
 end)
 
-print("[SWILL] V14 загружено. Noclip только во время полета.")
+print("[SWILL] V15 загружено. Snap-in Collection ready.")

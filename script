@@ -1,5 +1,5 @@
 --[[
-    EasyAutoFarm by klx (V18 - Smooth Target Lock-on)
+    EasyAutoFarm by klx (V19 - Speed Adjust & Reset Fix)
 ]]
 
 local Players = game:GetService("Players")
@@ -11,7 +11,8 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 -- ========== НАСТРОЙКИ ==========
 local CANDY_NAMES = {"candy", "sweet", "coin", "token", "collectible"} 
 local MAX_CANDY = 50                
-local FLY_SPEED = 25                
+local FLY_SPEED = 21                -- Базовая скорость полета
+local APPROACH_SPEED = 18           -- Скорость при подлете к конфете
 local SCAN_RADIUS = 300             
 local ANTI_FLING_SPEED_LIMIT = 100  
 -- ==============================
@@ -24,7 +25,7 @@ local autoResetEnabled = false
 local localCandyCount = 0
 local totalCollected = 0            
 local lastSafePosition = nil
-local processedCandies = {} -- Список конфет, к которым мы уже подлетали
+local processedCandies = {} 
 
 local noclipConnection = nil
 
@@ -184,37 +185,41 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
--- ========== ЛОГИКА ФАРМА ==========
-local function getCharacter()
-    local char = LocalPlayer.Character
-    if not char then return nil end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if hrp and hum and hum.Health > 0 then
-        return char, hrp, hum
-    end
-    return nil
-end
-
+-- ========== УЛУЧШЕННОЕ ОПРЕДЕЛЕНИЕ КОНФЕТ ==========
 local function getRealCandyCount()
+    -- 1. Проверяем leaderstats
     local leaderstats = LocalPlayer:FindFirstChild("leaderstats")
     if leaderstats then
         for _, stat in ipairs(leaderstats:GetChildren()) do
             local n = stat.Name:lower()
-            if n:find("candy") or n:find("sweet") then return stat.Value end
+            if n:find("candy") or n:find("sweet") or n:find("event") then 
+                return stat.Value 
+            end
         end
     end
+    
+    -- 2. Проверяем интерфейс (PlayerGui) на наличие текста с числом конфет
+    local gui = LocalPlayer:FindFirstChild("PlayerGui")
+    if gui then
+        for _, obj in ipairs(gui:GetDescendants()) do
+            if obj:IsA("TextLabel") and (obj.Name:lower():find("candy") or obj.Name:lower():find("sweet")) then
+                local num = tonumber(obj.Text:match("%d+"))
+                if num then return num end
+            end
+        end
+    end
+    
+    -- 3. Если нигде не нашли, возвращаем локальный счетчик
     return localCandyCount
 end
 
--- Ищет ближайшую конфету, ИГНОРИРУЯ те, к которым мы уже подлетали недавно
 local function getClosestCandy(hrp)
     local closestCandy = nil
     local shortestDistance = SCAN_RADIUS 
     local now = tick()
 
+    -- Очистка старого кэша
     for obj, timeProcessed in pairs(processedCandies) do
-        -- Очищаем память от старых конфет
         if now - timeProcessed > 2 or not obj.Parent then
             processedCandies[obj] = nil
         end
@@ -225,7 +230,6 @@ local function getClosestCandy(hrp)
             local nameLower = obj.Name:lower()
             for _, target in ipairs(CANDY_NAMES) do
                 if nameLower:find(target) then
-                    -- Проверяем, не обрабатывали ли мы ее только что
                     if not processedCandies[obj] then
                         local dist = (hrp.Position - obj.Position).Magnitude
                         if dist < shortestDistance then
@@ -241,6 +245,7 @@ local function getClosestCandy(hrp)
     return closestCandy
 end
 
+-- ========== ОСНОВНОЙ ЦИКЛ ==========
 local function farmLoop()
     local diedConnection
     local lastHum
@@ -267,12 +272,15 @@ local function farmLoop()
 
         local currentCount = getRealCandyCount()
         
-        -- Проверка на полный мешок
+        -- Логика полного мешка и Auto Reset
         if currentCount >= MAX_CANDY or localCandyCount >= MAX_CANDY then
             hum.PlatformStand = false
             hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            
             if autoResetEnabled then
-                if hum and hum.Health > 0 then hum.Health = 0 end
+                if hum and hum.Health > 0 then 
+                    hum.Health = 0 
+                end
                 task.wait(4) 
             else
                 task.wait(1)
@@ -280,32 +288,34 @@ local function farmLoop()
             continue
         end
 
-        -- Если цели нет или она исчезла, ищем новую
         if not currentTarget or not currentTarget.Parent then
             currentTarget = getClosestCandy(hrp)
         end
 
         if currentTarget then
-            hum.PlatformStand = true -- Отключаем гравитацию для полета
+            hum.PlatformStand = true
             
             local targetPos = currentTarget.Position
             local distance = (hrp.Position - targetPos).Magnitude
             
-            -- Если подлетели близко, считаем собранной и ищем следующую
-            if distance < 3 then
-                processedCandies[currentTarget] = tick() -- Заносим в черный список
+            -- Если мы близко к конфете (зона хитбокса)
+            if distance < 5 then
+                processedCandies[currentTarget] = tick() 
                 localCandyCount = localCandyCount + 1
                 totalCollected = totalCollected + 1
                 currentTarget = nil
-                -- Не ждем! Сразу летим к следующей в следующем кадре
             else
-                -- Плавный полет: задаем скорость, а не телепортируем CFrame
                 local direction = (targetPos - hrp.Position).Unit
-                -- Летим чуть выше пола, чтобы не врезаться
-                hrp.AssemblyLinearVelocity = (direction * FLY_SPEED) + Vector3.new(0, 2, 0)
+                
+                -- Снижаем скорость при подлете (ближе 15 стадов)
+                local currentSpeed = FLY_SPEED
+                if distance < 15 then
+                    currentSpeed = APPROACH_SPEED
+                end
+                
+                hrp.AssemblyLinearVelocity = (direction * currentSpeed) + Vector3.new(0, 2, 0)
             end
         else
-            -- Конфет рядом нет, висим
             hum.PlatformStand = false
             hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
             currentTarget = nil
@@ -372,4 +382,4 @@ autoResetBtn.MouseButton1Click:Connect(function()
     autoResetBtn.BackgroundColor3 = autoResetEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(100, 100, 100)
 end)
 
-print("[SWILL] V18 загружено. Smooth Target Lock-on.")
+print("[SWILL] V19 загружено. Скорость: 21/18. Улучшенный сбор.")

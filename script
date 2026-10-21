@@ -1,5 +1,5 @@
 --[[
-    EasyAutoFarm by klx (V19 - Speed Adjust & Reset Fix)
+    EasyAutoFarm by klx (V21 - Verified & Final)
 ]]
 
 local Players = game:GetService("Players")
@@ -11,8 +11,8 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 -- ========== НАСТРОЙКИ ==========
 local CANDY_NAMES = {"candy", "sweet", "coin", "token", "collectible"} 
 local MAX_CANDY = 50                
-local FLY_SPEED = 21                -- Базовая скорость полета
-local APPROACH_SPEED = 18           -- Скорость при подлете к конфете
+local FLY_SPEED = 21                
+local APPROACH_SPEED = 18           
 local SCAN_RADIUS = 300             
 local ANTI_FLING_SPEED_LIMIT = 100  
 -- ==============================
@@ -185,31 +185,29 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
--- ========== УЛУЧШЕННОЕ ОПРЕДЕЛЕНИЕ КОНФЕТ ==========
+-- ========== ЛОГИКА ФАРМА ==========
+local function getCharacter()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hrp and hum and hum.Health > 0 then
+        return char, hrp, hum
+    end
+    return nil
+end
+
 local function getRealCandyCount()
-    -- 1. Проверяем leaderstats
     local leaderstats = LocalPlayer:FindFirstChild("leaderstats")
     if leaderstats then
         for _, stat in ipairs(leaderstats:GetChildren()) do
             local n = stat.Name:lower()
-            if n:find("candy") or n:find("sweet") or n:find("event") then 
+            -- Ищем любые статы, связанные с ивентом
+            if n:find("candy") or n:find("sweet") or n:find("event") or n:find("coin") then 
                 return stat.Value 
             end
         end
     end
-    
-    -- 2. Проверяем интерфейс (PlayerGui) на наличие текста с числом конфет
-    local gui = LocalPlayer:FindFirstChild("PlayerGui")
-    if gui then
-        for _, obj in ipairs(gui:GetDescendants()) do
-            if obj:IsA("TextLabel") and (obj.Name:lower():find("candy") or obj.Name:lower():find("sweet")) then
-                local num = tonumber(obj.Text:match("%d+"))
-                if num then return num end
-            end
-        end
-    end
-    
-    -- 3. Если нигде не нашли, возвращаем локальный счетчик
     return localCandyCount
 end
 
@@ -218,7 +216,7 @@ local function getClosestCandy(hrp)
     local shortestDistance = SCAN_RADIUS 
     local now = tick()
 
-    -- Очистка старого кэша
+    -- Очистка старого кэша (защита от повторного сбора)
     for obj, timeProcessed in pairs(processedCandies) do
         if now - timeProcessed > 2 or not obj.Parent then
             processedCandies[obj] = nil
@@ -245,7 +243,6 @@ local function getClosestCandy(hrp)
     return closestCandy
 end
 
--- ========== ОСНОВНОЙ ЦИКЛ ==========
 local function farmLoop()
     local diedConnection
     local lastHum
@@ -272,8 +269,8 @@ local function farmLoop()
 
         local currentCount = getRealCandyCount()
         
-        -- Логика полного мешка и Auto Reset
-        if currentCount >= MAX_CANDY or localCandyCount >= MAX_CANDY then
+        -- Проверка на полный мешок (Auto Reset)
+        if currentCount >= MAX_CANDY or (currentCount == localCandyCount and localCandyCount >= MAX_CANDY) then
             hum.PlatformStand = false
             hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
             
@@ -298,7 +295,7 @@ local function farmLoop()
             local targetPos = currentTarget.Position
             local distance = (hrp.Position - targetPos).Magnitude
             
-            -- Если мы близко к конфете (зона хитбокса)
+            -- Если подлетели близко (зона хитбокса)
             if distance < 5 then
                 processedCandies[currentTarget] = tick() 
                 localCandyCount = localCandyCount + 1
@@ -307,13 +304,14 @@ local function farmLoop()
             else
                 local direction = (targetPos - hrp.Position).Unit
                 
-                -- Снижаем скорость при подлете (ближе 15 стадов)
+                -- Сбавляем скорость при подлете
                 local currentSpeed = FLY_SPEED
                 if distance < 15 then
                     currentSpeed = APPROACH_SPEED
                 end
                 
-                hrp.AssemblyLinearVelocity = (direction * currentSpeed) + Vector3.new(0, 2, 0)
+                -- Двигаемся строго по направлению
+                hrp.AssemblyLinearVelocity = direction * currentSpeed
             end
         else
             hum.PlatformStand = false
@@ -382,4 +380,4 @@ autoResetBtn.MouseButton1Click:Connect(function()
     autoResetBtn.BackgroundColor3 = autoResetEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(100, 100, 100)
 end)
 
-print("[SWILL] V19 загружено. Скорость: 21/18. Улучшенный сбор.")
+print("[SWILL] V21 загружено. Проверено и готово.")

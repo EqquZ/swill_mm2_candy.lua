@@ -1,5 +1,5 @@
 --[[
-    EasyAutoFarm by klx (V22 - True Fly-Through Collection)
+    EasyAutoFarm by klx (V23 - True Teleport Collection)
 ]]
 
 local Players = game:GetService("Players")
@@ -15,6 +15,7 @@ local FLY_SPEED = 21
 local APPROACH_SPEED = 18           
 local SCAN_RADIUS = 300             
 local ANTI_FLING_SPEED_LIMIT = 100  
+local TELEPORT_DISTANCE = 3         -- Дистанция, с которой происходит телепорт в конфету
 -- ==============================
 
 local scriptStartTime = os.clock() 
@@ -285,7 +286,6 @@ local function farmLoop()
             continue
         end
 
-        -- Если цели нет или она исчезла
         if not currentTarget or not currentTarget.Parent then
             currentTarget = getClosestCandy(hrp)
             targetStartTime = tick()
@@ -297,14 +297,16 @@ local function farmLoop()
             local targetPos = currentTarget.Position
             local distance = (hrp.Position - targetPos).Magnitude
             
-            -- Если подлетели ОЧЕНЬ близко (пролетаем сквозь) - считаем собранной
-            if distance < 2.5 then
+            -- ЕСЛИ МЫ БЛИЗКО - ТЕЛЕПОРТИРУЕМСЯ ПРЯМО В КОНФЕТУ
+            if distance < TELEPORT_DISTANCE then
+                hrp.CFrame = CFrame.new(targetPos) -- Точный телепорт в центр
                 processedCandies[currentTarget] = tick() 
                 localCandyCount = localCandyCount + 1
                 totalCollected = totalCollected + 1
                 currentTarget = nil
+                -- Не ждем! В следующем кадре летим к следующей.
             else
-                -- Если летим к цели больше 5 секунд, бросаем её
+                -- Летим к цели
                 if tick() - targetStartTime > 5 then
                     processedCandies[currentTarget] = tick()
                     currentTarget = nil
@@ -386,4 +388,4 @@ autoResetBtn.MouseButton1Click:Connect(function()
     autoResetBtn.BackgroundColor3 = autoResetEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(100, 100, 100)
 end)
 
-print("[SWILL] V22 загружено. Проверено: полет сквозь конфеты.")
+print("[SWILL] V23 загружено. Телепорт в конфету при подлете.")

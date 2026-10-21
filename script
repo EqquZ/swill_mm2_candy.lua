@@ -1,0 +1,339 @@
+--[[
+    SWILL MM2 Candy AutoFarm
+    Создано: 26.09.2025
+    Запуск через инжектор: loadstring(game:HttpGet("RAW_ССЫЛКА_НА_ЭТОТ_ФАЙЛ"))()
+    ВАЖНО: имена объектов (Candy, Bag, MaxCandy) могут отличаться в текущей версии MM2.
+    Если скрипт не видит конфеты — проверь workspace:GetDescendants() и замени CANDY_NAME.
+]]
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+-- ========== НАСТРОЙКИ (МЕНЯЙ ПОД СЕБЯ) ==========
+local CANDY_NAME = "Candy"          -- часть имени объекта конфеты в Workspace
+local BAG_NAME = "Bag"              -- часть имени мешка/инвентаря (если есть)
+local MAX_CANDY = 50                -- сколько конфет считается "полный мешок"
+local SAFE_Y = -500                 -- высота "под картой"
+local WAIT_BEFORE_FARM = 3          -- секунд ждать после спавна раунда, прежде чем лететь вниз
+local FARM_SPEED = 0.15             -- пауза между телепортами к конфетам (сек)
+-- =================================================
+
+local farming = false
+local statsVisible = false
+local farmStartTime = 0
+local candyCollected = 0
+local underMapPosition = Vector3.new(0, SAFE_Y, 0)
+
+-- ========== СОЗДАНИЕ GUI ==========
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "SWILL_CandyFarm"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = PlayerGui
+
+-- Главное окно
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 220, 0, 130)
+mainFrame.Position = UDim2.new(0, 20, 0, 20)
+mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Parent = screenGui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 8)
+corner.Parent = mainFrame
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 30)
+title.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+title.BorderSizePixel = 0
+title.Text = "SWILL | MM2 Candy"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.TextSize = 14
+title.Font = Enum.Font.GothamBold
+title.Parent = mainFrame
+
+local titleCorner = Instance.new("UICorner")
+titleCorner.CornerRadius = UDim.new(0, 8)
+titleCorner.Parent = title
+
+-- Тумблер Auto Farm
+local farmBtn = Instance.new("TextButton")
+farmBtn.Size = UDim2.new(1, -20, 0, 35)
+farmBtn.Position = UDim2.new(0, 10, 0, 40)
+farmBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+farmBtn.BorderSizePixel = 0
+farmBtn.Text = "Auto Farm: OFF"
+farmBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+farmBtn.Font = Enum.Font.Gotham
+farmBtn.TextSize = 14
+farmBtn.Parent = mainFrame
+
+local farmCorner = Instance.new("UICorner")
+farmCorner.CornerRadius = UDim.new(0, 6)
+farmCorner.Parent = farmBtn
+
+-- Тумблер Stats
+local statsBtn = Instance.new("TextButton")
+statsBtn.Size = UDim2.new(1, -20, 0, 35)
+statsBtn.Position = UDim2.new(0, 10, 0, 85)
+statsBtn.BackgroundColor3 = Color3.fromRGB(50, 80, 200)
+statsBtn.BorderSizePixel = 0
+statsBtn.Text = "Stats: OFF"
+statsBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+statsBtn.Font = Enum.Font.Gotham
+statsBtn.TextSize = 14
+statsBtn.Parent = mainFrame
+
+local statsCorner = Instance.new("UICorner")
+statsCorner.CornerRadius = UDim.new(0, 6)
+statsCorner.Parent = statsBtn
+
+-- Окно статистики (скрыто по умолчанию)
+local statsFrame = Instance.new("Frame")
+statsFrame.Name = "StatsFrame"
+statsFrame.Size = UDim2.new(0, 200, 0, 100)
+statsFrame.Position = UDim2.new(0, 250, 0, 20)
+statsFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+statsFrame.BorderSizePixel = 0
+statsFrame.Visible = false
+statsFrame.Active = true
+statsFrame.Draggable = true
+statsFrame.Parent = screenGui
+
+local statsFrameCorner = Instance.new("UICorner")
+statsFrameCorner.CornerRadius = UDim.new(0, 8)
+statsFrameCorner.Parent = statsFrame
+
+local statsTitle = Instance.new("TextLabel")
+statsTitle.Size = UDim2.new(1, 0, 0, 25)
+statsTitle.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+statsTitle.BorderSizePixel = 0
+statsTitle.Text = "Статистика"
+statsTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+statsTitle.Font = Enum.Font.GothamBold
+statsTitle.TextSize = 13
+statsTitle.Parent = statsFrame
+
+local statsTitleCorner = Instance.new("UICorner")
+statsTitleCorner.CornerRadius = UDim.new(0, 8)
+statsTitleCorner.Parent = statsTitle
+
+local timerLabel = Instance.new("TextLabel")
+timerLabel.Size = UDim2.new(1, -20, 0, 30)
+timerLabel.Position = UDim2.new(0, 10, 0, 30)
+timerLabel.BackgroundTransparency = 1
+timerLabel.Text = "Таймер: 00:00"
+timerLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+timerLabel.Font = Enum.Font.Gotham
+timerLabel.TextSize = 14
+timerLabel.TextXAlignment = Enum.TextXAlignment.Left
+timerLabel.Parent = statsFrame
+
+local candyLabel = Instance.new("TextLabel")
+candyLabel.Size = UDim2.new(1, -20, 0, 30)
+candyLabel.Position = UDim2.new(0, 10, 0, 60)
+candyLabel.BackgroundTransparency = 1
+candyLabel.Text = "Конфет: 0"
+candyLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
+candyLabel.Font = Enum.Font.Gotham
+candyLabel.TextSize = 14
+candyLabel.TextXAlignment = Enum.TextXAlignment.Left
+candyLabel.Parent = statsFrame
+
+-- ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
+local function getCharacter()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hrp and hum and hum.Health > 0 then
+        return char, hrp, hum
+    end
+    return nil
+end
+
+local function teleportTo(position)
+    local char, hrp, hum = getCharacter()
+    if not hrp then return end
+    -- Плавный/мгновенный телепорт с небольшим смещением, чтобы не застревать в текстурах
+    hrp.CFrame = CFrame.new(position + Vector3.new(0, 5, 0))
+end
+
+local function resetCharacter()
+    local char, hrp, hum = getCharacter()
+    if hum then
+        hum.Health = 0
+    end
+end
+
+-- Поиск всех конфет в Workspace
+local function findCandies()
+    local candies = {}
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("BasePart") and obj.Name:lower():find(CANDY_NAME:lower()) then
+            -- Исключаем части персонажа, чтобы не телепортироваться к себе
+            if not obj:IsDescendantOf(LocalPlayer.Character or game) then
+                table.insert(candies, obj)
+            end
+        end
+    end
+    return candies
+end
+
+-- Попытка получить количество конфет из мешка/инвентаря
+local function getCandyCount()
+    -- Если есть объект с именем мешка, можно попробовать прочитать Value
+    -- Это заглушка: в разных билдах MM2 данные могут лежать в PlayerGui, ReplicatedStorage или на персонаже.
+    -- Если у тебя есть точный путь — замени эту функцию.
+    local char = LocalPlayer.Character
+    if char then
+        local bag = char:FindFirstChild(BAG_NAME, true)
+        if bag and bag:IsA("IntValue") then
+            return bag.Value
+        end
+    end
+    -- Если не нашли — возвращаем локальный счётчик (сколько телепортаций к конфетам сделали)
+    return candyCollected
+end
+
+-- ========== ЛОГИКА ФАРМА ==========
+local function waitForRoundAndGoUnderMap()
+    -- Ждём, пока появится персонаж
+    while not getCharacter() do task.wait(0.5) end
+    -- Небольшая задержка, чтобы раунд успел инициализироваться
+    task.wait(WAIT_BEFORE_FARM)
+    -- Улетаем под карту
+    teleportTo(underMapPosition)
+end
+
+local function farmLoop()
+    while farming do
+        local char, hrp, hum = getCharacter()
+        if not char then
+            task.wait(1)
+            continue
+        end
+
+        -- Если мы не под картой — возвращаем под карту
+        if hrp.Position.Y > SAFE_Y + 100 then
+            teleportTo(underMapPosition)
+            task.wait(0.5)
+        end
+
+        -- Ищем конфеты
+        local candies = findCandies()
+        if #candies > 0 then
+            for _, candy in ipairs(candies) do
+                if not farming then break end
+                -- Телепортируемся чуть выше конфеты, чтобы задеть хитбоксом
+                local pos = candy.Position
+                teleportTo(pos)
+                candyCollected = candyCollected + 1
+                task.wait(FARM_SPEED)
+            end
+        else
+            -- Конфет пока нет — просто висим под картой
+            teleportTo(underMapPosition)
+            task.wait(1)
+        end
+
+        -- Проверка заполнения мешка
+        local currentCount = getCandyCount()
+        if currentCount >= MAX_CANDY then
+            resetCharacter()
+            candyCollected = 0
+            task.wait(2) -- ждём респавна
+            if farming then
+                waitForRoundAndGoUnderMap()
+            end
+        end
+
+        task.wait(0.1)
+    end
+end
+
+-- ========== ОБНОВЛЕНИЕ GUI ==========
+local function updateStats()
+    if not statsVisible then return end
+    local elapsed = math.floor(tick() - farmStartTime)
+    local mins = math.floor(elapsed / 60)
+    local secs = elapsed % 60
+    timerLabel.Text = string.format("Таймер: %02d:%02d", mins, secs)
+    candyLabel.Text = "Конфет: " .. tostring(candyCollected)
+end
+
+RunService.RenderStepped:Connect(function()
+    if statsVisible and farming then
+        updateStats()
+    end
+end)
+
+-- ========== ОБРАБОТЧИКИ КНОПОК ==========
+farmBtn.MouseButton1Click:Connect(function()
+    farming = not farming
+    if farming then
+        farmBtn.Text = "Auto Farm: ON"
+        farmBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+        farmStartTime = tick()
+        candyCollected = 0
+        -- Запускаем фарм в отдельном потоке
+        task.spawn(function()
+            waitForRoundAndGoUnderMap()
+            farmLoop()
+        end)
+    else
+        farmBtn.Text = "Auto Farm: OFF"
+        farmBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+        -- Возвращаем персонажа на поверхность (опционально)
+        local char, hrp, hum = getCharacter()
+        if hrp then
+            hrp.CFrame = CFrame.new(0, 50, 0) -- примерная безопасная точка на поверхности
+        end
+    end
+end)
+
+statsBtn.MouseButton1Click:Connect(function()
+    statsVisible = not statsVisible
+    statsFrame.Visible = statsVisible
+    statsBtn.Text = "Stats: " .. (statsVisible and "ON" or "OFF")
+    statsBtn.BackgroundColor3 = statsVisible and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(50, 80, 200)
+    if statsVisible then
+        updateStats()
+    end
+end)
+
+-- Перетаскивание окна статистики (опционально)
+statsFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        local startPos = input.Position
+        local startFramePos = statsFrame.Position
+        local conn
+        conn = UserInputService.InputChanged:Connect(function(moveInput)
+            if moveInput.UserInputType == Enum.UserInputType.MouseMovement then
+                local delta = moveInput.Position - startPos
+                statsFrame.Position = UDim2.new(
+                    startFramePos.X.Scale,
+                    startFramePos.X.Offset + delta.X,
+                    startFramePos.Y.Scale,
+                    startFramePos.Y.Offset + delta.Y
+                )
+            end
+        end)
+        UserInputService.InputEnded:Connect(function(endInput)
+            if endInput.UserInputType == Enum.UserInputType.MouseButton1 then
+                if conn then conn:Disconnect() end
+            end
+        end)
+    end
+end)
+
+-- Уведомление о загрузке
+print("[SWILL] MM2 Candy Farm загружен. Нажми 'Auto Farm: OFF' для старта.")

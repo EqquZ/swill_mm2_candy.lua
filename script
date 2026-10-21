@@ -1,5 +1,5 @@
 --[[
-    EasyAutoFarm by klx (V21 - Verified & Final)
+    EasyAutoFarm by klx (V22 - True Fly-Through Collection)
 ]]
 
 local Players = game:GetService("Players")
@@ -202,7 +202,6 @@ local function getRealCandyCount()
     if leaderstats then
         for _, stat in ipairs(leaderstats:GetChildren()) do
             local n = stat.Name:lower()
-            -- Ищем любые статы, связанные с ивентом
             if n:find("candy") or n:find("sweet") or n:find("event") or n:find("coin") then 
                 return stat.Value 
             end
@@ -216,7 +215,6 @@ local function getClosestCandy(hrp)
     local shortestDistance = SCAN_RADIUS 
     local now = tick()
 
-    -- Очистка старого кэша (защита от повторного сбора)
     for obj, timeProcessed in pairs(processedCandies) do
         if now - timeProcessed > 2 or not obj.Parent then
             processedCandies[obj] = nil
@@ -247,6 +245,7 @@ local function farmLoop()
     local diedConnection
     local lastHum
     local currentTarget = nil
+    local targetStartTime = 0
 
     enableNoclip()
 
@@ -264,6 +263,7 @@ local function farmLoop()
             diedConnection = hum.Died:Connect(function()
                 localCandyCount = 0
                 processedCandies = {}
+                currentTarget = nil
             end)
         end
 
@@ -285,8 +285,10 @@ local function farmLoop()
             continue
         end
 
+        -- Если цели нет или она исчезла
         if not currentTarget or not currentTarget.Parent then
             currentTarget = getClosestCandy(hrp)
+            targetStartTime = tick()
         end
 
         if currentTarget then
@@ -295,23 +297,27 @@ local function farmLoop()
             local targetPos = currentTarget.Position
             local distance = (hrp.Position - targetPos).Magnitude
             
-            -- Если подлетели близко (зона хитбокса)
-            if distance < 5 then
+            -- Если подлетели ОЧЕНЬ близко (пролетаем сквозь) - считаем собранной
+            if distance < 2.5 then
                 processedCandies[currentTarget] = tick() 
                 localCandyCount = localCandyCount + 1
                 totalCollected = totalCollected + 1
                 currentTarget = nil
             else
-                local direction = (targetPos - hrp.Position).Unit
-                
-                -- Сбавляем скорость при подлете
-                local currentSpeed = FLY_SPEED
-                if distance < 15 then
-                    currentSpeed = APPROACH_SPEED
+                -- Если летим к цели больше 5 секунд, бросаем её
+                if tick() - targetStartTime > 5 then
+                    processedCandies[currentTarget] = tick()
+                    currentTarget = nil
+                else
+                    local direction = (targetPos - hrp.Position).Unit
+                    
+                    local currentSpeed = FLY_SPEED
+                    if distance < 15 then
+                        currentSpeed = APPROACH_SPEED
+                    end
+                    
+                    hrp.AssemblyLinearVelocity = direction * currentSpeed
                 end
-                
-                -- Двигаемся строго по направлению
-                hrp.AssemblyLinearVelocity = direction * currentSpeed
             end
         else
             hum.PlatformStand = false
@@ -380,4 +386,4 @@ autoResetBtn.MouseButton1Click:Connect(function()
     autoResetBtn.BackgroundColor3 = autoResetEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(100, 100, 100)
 end)
 
-print("[SWILL] V21 загружено. Проверено и готово.")
+print("[SWILL] V22 загружено. Проверено: полет сквозь конфеты.")

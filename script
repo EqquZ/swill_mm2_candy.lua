@@ -1,5 +1,5 @@
 --[[
-    SWILL MM2 Candy AutoFarm (V5 - Speed 21 & Safe Reset)
+    SWILL MM2 Candy AutoFarm (V6 - Optimized & GUI Update)
 ]]
 
 local Players = game:GetService("Players")
@@ -12,13 +12,15 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 -- ========== НАСТРОЙКИ ==========
 local CANDY_NAMES = {"candy", "sweet", "coin", "token", "collectible"} 
 local MAX_CANDY = 50                
-local FLY_SPEED = 21                -- Скорость полета (studs/sec). Безопасное значение.
+local FLY_SPEED = 21                
+local MAX_DISTANCE = 800            -- Игнорируем объекты дальше этого расстояния (отсекает лобби)
 -- ==============================
 
 local scriptStartTime = os.clock() 
 local farming = false
 local statsVisible = false
 local localCandyCount = 0
+local totalCollected = 0            -- Счетчик за все время
 
 -- ========== GUI ==========
 local screenGui = Instance.new("ScreenGui")
@@ -26,6 +28,7 @@ screenGui.Name = "SWILL_CandyFarm"
 screenGui.ResetOnSpawn = false
 screenGui.Parent = PlayerGui
 
+-- Главное окно
 local mainFrame = Instance.new("Frame")
 mainFrame.Size = UDim2.new(0, 220, 0, 130)
 mainFrame.Position = UDim2.new(0, 20, 0, 20)
@@ -40,7 +43,7 @@ local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, 0, 0, 30)
 title.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
 title.BorderSizePixel = 0
-title.Text = "SWILL | MM2 Farm V5"
+title.Text = "EasyAutoFarm" -- Изменено название
 title.TextColor3 = Color3.fromRGB(255, 255, 255)
 title.Font = Enum.Font.GothamBold
 title.Parent = mainFrame
@@ -68,8 +71,9 @@ statsBtn.Font = Enum.Font.Gotham
 statsBtn.Parent = mainFrame
 Instance.new("UICorner", statsBtn).CornerRadius = UDim.new(0, 6)
 
+-- Окно статистики
 local statsFrame = Instance.new("Frame")
-statsFrame.Size = UDim2.new(0, 200, 0, 100)
+statsFrame.Size = UDim2.new(0, 200, 0, 140) -- Увеличили высоту для новых строк
 statsFrame.Position = UDim2.new(0, 250, 0, 20)
 statsFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 statsFrame.BorderSizePixel = 0
@@ -80,7 +84,7 @@ statsFrame.Parent = screenGui
 Instance.new("UICorner", statsFrame).CornerRadius = UDim.new(0, 8)
 
 local timerLabel = Instance.new("TextLabel")
-timerLabel.Size = UDim2.new(1, -20, 0, 30)
+timerLabel.Size = UDim2.new(1, -20, 0, 25)
 timerLabel.Position = UDim2.new(0, 10, 0, 10)
 timerLabel.BackgroundTransparency = 1
 timerLabel.Text = "Время: 00:00"
@@ -90,14 +94,34 @@ timerLabel.TextXAlignment = Enum.TextXAlignment.Left
 timerLabel.Parent = statsFrame
 
 local candyLabel = Instance.new("TextLabel")
-candyLabel.Size = UDim2.new(1, -20, 0, 30)
-candyLabel.Position = UDim2.new(0, 10, 0, 45)
+candyLabel.Size = UDim2.new(1, -20, 0, 25)
+candyLabel.Position = UDim2.new(0, 10, 0, 35)
 candyLabel.BackgroundTransparency = 1
 candyLabel.Text = "Собрано: 0 / 50"
 candyLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
 candyLabel.Font = Enum.Font.Gotham
 candyLabel.TextXAlignment = Enum.TextXAlignment.Left
 candyLabel.Parent = statsFrame
+
+local totalLabel = Instance.new("TextLabel")
+totalLabel.Size = UDim2.new(1, -20, 0, 25)
+totalLabel.Position = UDim2.new(0, 10, 0, 60)
+totalLabel.BackgroundTransparency = 1
+totalLabel.Text = "Собрано всего: 0"
+totalLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+totalLabel.Font = Enum.Font.Gotham
+totalLabel.TextXAlignment = Enum.TextXAlignment.Left
+totalLabel.Parent = statsFrame
+
+local footerLabel = Instance.new("TextLabel")
+footerLabel.Size = UDim2.new(1, 0, 0, 20)
+footerLabel.Position = UDim2.new(0, 0, 1, -25)
+footerLabel.BackgroundTransparency = 1
+footerLabel.Text = "by klx"
+footerLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
+footerLabel.Font = Enum.Font.Gotham
+footerLabel.TextSize = 11
+footerLabel.Parent = statsFrame
 
 -- ========== ЛОГИКА ==========
 local function getCharacter()
@@ -112,7 +136,6 @@ local function getCharacter()
 end
 
 local function getRealCandyCount()
-    -- 1. Проверяем leaderstats
     local leaderstats = LocalPlayer:FindFirstChild("leaderstats")
     if leaderstats then
         for _, stat in ipairs(leaderstats:GetChildren()) do
@@ -120,31 +143,28 @@ local function getRealCandyCount()
             if n:find("candy") or n:find("sweet") then return stat.Value end
         end
     end
-    -- 2. Проверяем PlayerGui (интерфейс игры)
-    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-    if playerGui then
-        for _, obj in ipairs(playerGui:GetDescendants()) do
-            if (obj:IsA("TextLabel") or obj:IsA("IntValue")) and obj.Name:lower():find("candy") then
-                if obj:IsA("TextLabel") and tonumber(obj.Text) then return tonumber(obj.Text) end
-                if obj:IsA("IntValue") then return obj.Value end
-            end
-        end
-    end
-    -- 3. Если не нашли, используем локальный счетчик
     return localCandyCount
 end
 
 local function findCandies()
     local candies = {}
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return candies end
+    local playerPos = char.HumanoidRootPart.Position
+
     for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("BasePart") or obj:IsA("MeshPart") or obj:IsA("Part") then
-            local nameLower = obj.Name:lower()
-            for _, target in ipairs(CANDY_NAMES) do
-                if nameLower:find(target) then
-                    if not obj:IsDescendantOf(LocalPlayer.Character) then
-                        table.insert(candies, obj)
+        if obj:IsA("BasePart") then
+            -- Фильтр фантомных монет: они обычно невидимые (Transparency = 1)
+            if obj.Transparency < 1 then
+                local nameLower = obj.Name:lower()
+                for _, target in ipairs(CANDY_NAMES) do
+                    if nameLower:find(target) then
+                        -- Проверка на расстояние: если объект далеко (в лобби), не берем его
+                        if (playerPos - obj.Position).Magnitude <= MAX_DISTANCE then
+                            table.insert(candies, obj)
+                        end
+                        break
                     end
-                    break
                 end
             end
         end
@@ -152,18 +172,15 @@ local function findCandies()
     return candies
 end
 
--- Плавный полет со скоростью 21
+-- Плавный полет ровно в координаты конфеты (без оффсета)
 local function flyToPart(targetPart)
     local char, hrp, hum = getCharacter()
     if not hrp or not targetPart or not targetPart.Parent then return false end
     
-    -- Берем позицию конфеты, добавляем 2 стада вверх, чтобы не застрять в полу
-    local targetPos = targetPart.Position + Vector3.new(0, 2, 0)
+    local targetPos = targetPart.Position 
     local distance = (hrp.Position - targetPos).Magnitude
-    
-    -- Время = Расстояние / Скорость (21)
     local timeToFly = distance / FLY_SPEED
-    if timeToFly < 0.2 then timeToFly = 0.2 end -- Минимальное время полета
+    if timeToFly < 0.15 then timeToFly = 0.15 end
     
     local tweenInfo = TweenInfo.new(timeToFly, Enum.EasingStyle.Linear)
     local tween = TweenService:Create(hrp, tweenInfo, {CFrame = CFrame.new(targetPos)})
@@ -171,11 +188,14 @@ local function flyToPart(targetPart)
     tween:Play()
     tween.Completed:Wait()
     
-    task.wait(0.05) -- Небольшая пауза для регистрации сбора
+    task.wait(0.05)
     return true
 end
 
 local function farmLoop()
+    local diedConnection
+    local lastHum
+
     while farming do
         local char, hrp, hum = getCharacter()
         
@@ -184,27 +204,27 @@ local function farmLoop()
             continue
         end
 
-        -- Отслеживаем смерть для сброса локального счетчика
-        hum.Died:Connect(function()
-            localCandyCount = 0
-        end)
+        -- Оптимизация: подключаем событие смерти только один раз при смене персонажа
+        if hum ~= lastHum then
+            if diedConnection then diedConnection:Disconnect() end
+            lastHum = hum
+            diedConnection = hum.Died:Connect(function()
+                localCandyCount = 0
+            end)
+        end
 
         local currentCount = getRealCandyCount()
         
-        -- Авто-ресет при 50 конфетах
         if currentCount >= MAX_CANDY or localCandyCount >= MAX_CANDY then
-            if hum and hum.Health > 0 then 
-                hum.Health = 0 
-            end
+            if hum and hum.Health > 0 then hum.Health = 0 end
             localCandyCount = 0
-            task.wait(4) -- Ждем респавна и загрузки карты
+            task.wait(4) 
             continue
         end
 
         local candies = findCandies()
         
         if #candies > 0 then
-            -- Сортируем по ближайшему расстоянию
             table.sort(candies, function(a, b)
                 return (hrp.Position - a.Position).Magnitude < (hrp.Position - b.Position).Magnitude
             end)
@@ -217,13 +237,16 @@ local function farmLoop()
                 if candy and candy.Parent then
                     flyToPart(candy)
                     localCandyCount = localCandyCount + 1
+                    totalCollected = totalCollected + 1 -- Увеличиваем общий счетчик
                 end
             end
         else
-            -- Если конфет нет (лобби или перерыв между раундами), просто ждем
+            -- Если конфет рядом нет (лобби), спим чуть дольше для оптимизации
             task.wait(0.5)
         end
     end
+
+    if diedConnection then diedConnection:Disconnect() end
 end
 
 -- ========== GUI ЛОГИКА ==========
@@ -234,6 +257,7 @@ RunService.RenderStepped:Connect(function()
         
         local displayCount = getRealCandyCount()
         candyLabel.Text = "Собрано: " .. tostring(displayCount) .. " / " .. tostring(MAX_CANDY)
+        totalLabel.Text = "Собрано всего: " .. tostring(totalCollected)
     end
 end)
 
@@ -242,7 +266,7 @@ farmBtn.MouseButton1Click:Connect(function()
     if farming then
         farmBtn.Text = "Auto Farm: ON"
         farmBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
-        localCandyCount = 0 -- Сброс при старте
+        localCandyCount = 0 
         task.spawn(farmLoop)
     else
         farmBtn.Text = "Auto Farm: OFF"

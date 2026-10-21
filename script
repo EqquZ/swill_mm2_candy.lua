@@ -1,5 +1,5 @@
 --[[
-    SWILL MM2 Candy AutoFarm (V8 - Smooth Flight & Anti-Cheat Safe)
+    EasyAutoFarm by klx (V10 - Real Anti-Fling)
 ]]
 
 local Players = game:GetService("Players")
@@ -11,31 +11,18 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 -- ========== НАСТРОЙКИ ==========
 local CANDY_NAMES = {"candy", "sweet", "coin", "token", "collectible"} 
 local MAX_CANDY = 50                
-local FLY_SPEED = 25                -- Скорость полета
-local SCAN_RADIUS = 150             -- Радиус поиска (150 стадов - это очень близко, исключает полеты через всю карту)
+local FLY_SPEED = 25                
+local SCAN_RADIUS = 150             
+local ANTI_FLING_SPEED_LIMIT = 150  -- Порог скорости, после которого срабатывает защита
 -- ==============================
 
 local scriptStartTime = os.clock() 
 local farming = false
 local statsVisible = false
+local antiFlingEnabled = false
 local localCandyCount = 0
 local totalCollected = 0            
-
--- ========== NOCLIP & GRAVITY OFF ==========
-RunService.Stepped:Connect(function()
-    if farming and LocalPlayer.Character then
-        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-        if hum then
-            -- PlatformStand отключает анимации ходьбы и гравитацию, персонаж не трясется
-            hum.PlatformStand = true 
-        end
-        for _, v in pairs(LocalPlayer.Character:GetDescendants()) do
-            if v:IsA("BasePart") then
-                v.CanCollide = false
-            end
-        end
-    end
-end)
+local lastSafePosition = nil
 
 -- ========== GUI ==========
 local screenGui = Instance.new("ScreenGui")
@@ -44,7 +31,7 @@ screenGui.ResetOnSpawn = false
 screenGui.Parent = PlayerGui
 
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 220, 0, 130)
+mainFrame.Size = UDim2.new(0, 220, 0, 170) 
 mainFrame.Position = UDim2.new(0, 20, 0, 20)
 mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 mainFrame.BorderSizePixel = 0
@@ -64,8 +51,8 @@ title.Parent = mainFrame
 Instance.new("UICorner", title).CornerRadius = UDim.new(0, 8)
 
 local farmBtn = Instance.new("TextButton")
-farmBtn.Size = UDim2.new(1, -20, 0, 35)
-farmBtn.Position = UDim2.new(0, 10, 0, 40)
+farmBtn.Size = UDim2.new(1, -20, 0, 30)
+farmBtn.Position = UDim2.new(0, 10, 0, 35)
 farmBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
 farmBtn.BorderSizePixel = 0
 farmBtn.Text = "Auto Farm: OFF"
@@ -75,8 +62,8 @@ farmBtn.Parent = mainFrame
 Instance.new("UICorner", farmBtn).CornerRadius = UDim.new(0, 6)
 
 local statsBtn = Instance.new("TextButton")
-statsBtn.Size = UDim2.new(1, -20, 0, 35)
-statsBtn.Position = UDim2.new(0, 10, 0, 85)
+statsBtn.Size = UDim2.new(1, -20, 0, 30)
+statsBtn.Position = UDim2.new(0, 10, 0, 75)
 statsBtn.BackgroundColor3 = Color3.fromRGB(50, 80, 200)
 statsBtn.BorderSizePixel = 0
 statsBtn.Text = "Stats: OFF"
@@ -84,6 +71,17 @@ statsBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 statsBtn.Font = Enum.Font.Gotham
 statsBtn.Parent = mainFrame
 Instance.new("UICorner", statsBtn).CornerRadius = UDim.new(0, 6)
+
+local antiFlingBtn = Instance.new("TextButton")
+antiFlingBtn.Size = UDim2.new(1, -20, 0, 30)
+antiFlingBtn.Position = UDim2.new(0, 10, 0, 115)
+antiFlingBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+antiFlingBtn.BorderSizePixel = 0
+antiFlingBtn.Text = "Anti-Fling: OFF"
+antiFlingBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+antiFlingBtn.Font = Enum.Font.Gotham
+antiFlingBtn.Parent = mainFrame
+Instance.new("UICorner", antiFlingBtn).CornerRadius = UDim.new(0, 6)
 
 local statsFrame = Instance.new("Frame")
 statsFrame.Size = UDim2.new(0, 200, 0, 140) 
@@ -136,7 +134,50 @@ footerLabel.Font = Enum.Font.Gotham
 footerLabel.TextSize = 11
 footerLabel.Parent = statsFrame
 
--- ========== ЛОГИКА ==========
+-- ========== REAL ANTI-FLING (Защита от читеров) ==========
+RunService.Heartbeat:Connect(function()
+    if antiFlingEnabled and LocalPlayer.Character then
+        local char = LocalPlayer.Character
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        
+        if hrp and hum and hum.Health > 0 then
+            -- 1. Сброс аномальной скорости (если кто-то применил флинг)
+            if hrp.AssemblyLinearVelocity.Magnitude > ANTI_FLING_SPEED_LIMIT or hrp.AssemblyAngularVelocity.Magnitude > 50 then
+                hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                -- Возвращаем на последнюю безопасную позицию при сильном флинге
+                if lastSafePosition and not farming then
+                    hrp.CFrame = lastSafePosition
+                end
+            end
+
+            -- 2. Защита от изменения свойств физики (эксплойты часто ломают CanCollide)
+            if not farming then
+                -- Если мы не летим сами, принудительно возвращаем коллизию и выключаем платформу
+                if not hrp.CanCollide then hrp.CanCollide = true end
+                if hum.PlatformStand then hum.PlatformStand = false end
+                
+                -- Запоминаем безопасную позицию, если мы не в полете и не падаем
+                if hrp.Position.Y > -50 and hrp.AssemblyLinearVelocity.Magnitude < 10 then
+                    lastSafePosition = hrp.CFrame
+                end
+            end
+
+            -- 3. Anti-Void (защита от падения под карту)
+            if hrp.Position.Y < -50 then
+                if lastSafePosition then
+                    hrp.CFrame = lastSafePosition
+                else
+                    hrp.CFrame = CFrame.new(0, 50, 0) 
+                end
+                hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            end
+        end
+    end
+end)
+
+-- ========== ЛОГИКА ФАРМА ==========
 local function getCharacter()
     local char = LocalPlayer.Character
     if not char then return nil end
@@ -159,7 +200,6 @@ local function getRealCandyCount()
     return localCandyCount
 end
 
--- Возвращает ОДНУ самую ближайшую конфету
 local function getClosestCandy(hrp)
     local closestCandy = nil
     local shortestDistance = SCAN_RADIUS 
@@ -169,10 +209,8 @@ local function getClosestCandy(hrp)
             local nameLower = obj.Name:lower()
             for _, target in ipairs(CANDY_NAMES) do
                 if nameLower:find(target) then
-                    -- 1. Фильтр по высоте (чтобы не лететь в небо за фейком)
                     local yDiff = math.abs(hrp.Position.Y - obj.Position.Y)
                     if yDiff <= 50 then
-                        -- 2. Фильтр по дистанции
                         local dist = (hrp.Position - obj.Position).Magnitude
                         if dist < shortestDistance then
                             shortestDistance = dist
@@ -187,33 +225,41 @@ local function getClosestCandy(hrp)
     return closestCandy
 end
 
+-- Функция полета с временным отключением коллизии
 local function flyToPart(targetPart)
     local char, hrp, hum = getCharacter()
     if not hrp or not targetPart or not targetPart.Parent then return false end
     
-    -- Плавное движение через Velocity (античит это любит больше, чем CFrame)
+    -- Включаем Noclip и отключаем гравитацию ТОЛЬКО на время полета
+    hum.PlatformStand = true
+    for _, v in pairs(char:GetDescendants()) do
+        if v:IsA("BasePart") then v.CanCollide = false end
+    end
+
     local startTime = tick()
     while farming and targetPart and targetPart.Parent do
         local currentChar, currentHrp = getCharacter()
         if not currentHrp then break end
         
         local distance = (currentHrp.Position - targetPart.Position).Magnitude
-        if distance < 3 then break end -- Долетели
+        if distance < 3 then break end
         
         local direction = (targetPart.Position - currentHrp.Position).Unit
-        -- Задаем скорость напрямую (имитация полета)
         currentHrp.AssemblyLinearVelocity = direction * FLY_SPEED
         
-        -- Если летим слишком долго (застряли), прерываем
         if tick() - startTime > 3 then break end
-        
         RunService.Heartbeat:Wait()
     end
     
-    -- Останавливаемся после подлета
+    -- Возвращаем физику обратно после подлета (или если прервались)
     if hrp then
         hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+        hum.PlatformStand = false
+        for _, v in pairs(char:GetDescendants()) do
+            if v:IsA("BasePart") then v.CanCollide = true end
+        end
     end
+    
     task.wait(0.1)
     return true
 end
@@ -247,7 +293,6 @@ local function farmLoop()
             continue
         end
 
-        -- Ищем САМУЮ БЛИЖАЙШУЮ конфету (только одну)
         local candy = getClosestCandy(hrp)
         
         if candy then
@@ -255,8 +300,6 @@ local function farmLoop()
             localCandyCount = localCandyCount + 1
             totalCollected = totalCollected + 1 
         else
-            -- Если в радиусе 150 стадов нет конфет, ждем
-            hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
             task.wait(0.5)
         end
     end
@@ -287,7 +330,7 @@ farmBtn.MouseButton1Click:Connect(function()
         farmBtn.Text = "Auto Farm: OFF"
         farmBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
         
-        -- Возвращаем физику персонажу при выключении
+        -- Принудительно возвращаем физику при выключении
         if LocalPlayer.Character then
             local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
             if hum then hum.PlatformStand = false end
@@ -303,4 +346,10 @@ statsBtn.MouseButton1Click:Connect(function()
     statsFrame.Visible = statsVisible
     statsBtn.Text = "Stats: " .. (statsVisible and "ON" or "OFF")
     statsBtn.BackgroundColor3 = statsVisible and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(50, 80, 200)
+end)
+
+antiFlingBtn.MouseButton1Click:Connect(function()
+    antiFlingEnabled = not antiFlingEnabled
+    antiFlingBtn.Text = "Anti-Fling: " .. (antiFlingEnabled and "ON" or "OFF")
+    antiFlingBtn.BackgroundColor3 = antiFlingEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(100, 100, 100)
 end)

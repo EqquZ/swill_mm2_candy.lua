@@ -1,9 +1,7 @@
 --[[
-    SWILL MM2 Candy AutoFarm
+    SWILL MM2 Candy AutoFarm (Fixed Version)
     Создано: 26.09.2025
-    Запуск через инжектор: loadstring(game:HttpGet("RAW_ССЫЛКА_НА_ЭТОТ_ФАЙЛ"))()
-    ВАЖНО: имена объектов (Candy, Bag, MaxCandy) могут отличаться в текущей версии MM2.
-    Если скрипт не видит конфеты — проверь workspace:GetDescendants() и замени CANDY_NAME.
+    Запуск через инжектор: loadstring(game:HttpGet("https://raw.githubusercontent.com/EqquZ/swill_mm2_candy.lua/refs/heads/main/script"))()
 ]]
 
 local Players = game:GetService("Players")
@@ -14,20 +12,16 @@ local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- ========== НАСТРОЙКИ (МЕНЯЙ ПОД СЕБЯ) ==========
-local CANDY_NAME = "Candy"          -- часть имени объекта конфеты в Workspace
-local BAG_NAME = "Bag"              -- часть имени мешка/инвентаря (если есть)
-local MAX_CANDY = 50                -- сколько конфет считается "полный мешок"
-local SAFE_Y = -500                 -- высота "под картой"
-local WAIT_BEFORE_FARM = 3          -- секунд ждать после спавна раунда, прежде чем лететь вниз
-local FARM_SPEED = 0.15             -- пауза между телепортами к конфетам (сек)
--- =================================================
+-- ========== НАСТРОЙКИ ==========
+local CANDY_NAMES = {"candy", "coin", "sweet"} -- Скрипт будет искать объекты с этими словами в имени
+local MAX_CANDY = 50                -- Сколько конфет до авто-ресета
+local FARM_SPEED = 0.1              -- Пауза между телепортами к конфетам
+-- ==============================
 
 local farming = false
 local statsVisible = false
 local farmStartTime = 0
 local candyCollected = 0
-local underMapPosition = Vector3.new(0, SAFE_Y, 0)
 
 -- ========== СОЗДАНИЕ GUI ==========
 local screenGui = Instance.new("ScreenGui")
@@ -96,7 +90,7 @@ local statsCorner = Instance.new("UICorner")
 statsCorner.CornerRadius = UDim.new(0, 6)
 statsCorner.Parent = statsBtn
 
--- Окно статистики (скрыто по умолчанию)
+-- Окно статистики
 local statsFrame = Instance.new("Frame")
 statsFrame.Name = "StatsFrame"
 statsFrame.Size = UDim2.new(0, 200, 0, 100)
@@ -160,60 +154,26 @@ local function getCharacter()
     return nil
 end
 
-local function teleportTo(position)
-    local char, hrp, hum = getCharacter()
-    if not hrp then return end
-    -- Плавный/мгновенный телепорт с небольшим смещением, чтобы не застревать в текстурах
-    hrp.CFrame = CFrame.new(position + Vector3.new(0, 5, 0))
-end
-
-local function resetCharacter()
-    local char, hrp, hum = getCharacter()
-    if hum then
-        hum.Health = 0
-    end
-end
-
--- Поиск всех конфет в Workspace
 local function findCandies()
     local candies = {}
     for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("BasePart") and obj.Name:lower():find(CANDY_NAME:lower()) then
-            -- Исключаем части персонажа, чтобы не телепортироваться к себе
-            if not obj:IsDescendantOf(LocalPlayer.Character or game) then
-                table.insert(candies, obj)
+        if obj:IsA("BasePart") or obj:IsA("MeshPart") then
+            local nameLower = obj.Name:lower()
+            for _, targetName in ipairs(CANDY_NAMES) do
+                if nameLower:find(targetName) then
+                    -- Исключаем части персонажа
+                    if not obj:IsDescendantOf(LocalPlayer.Character or game) then
+                        table.insert(candies, obj)
+                    end
+                    break
+                end
             end
         end
     end
     return candies
 end
 
--- Попытка получить количество конфет из мешка/инвентаря
-local function getCandyCount()
-    -- Если есть объект с именем мешка, можно попробовать прочитать Value
-    -- Это заглушка: в разных билдах MM2 данные могут лежать в PlayerGui, ReplicatedStorage или на персонаже.
-    -- Если у тебя есть точный путь — замени эту функцию.
-    local char = LocalPlayer.Character
-    if char then
-        local bag = char:FindFirstChild(BAG_NAME, true)
-        if bag and bag:IsA("IntValue") then
-            return bag.Value
-        end
-    end
-    -- Если не нашли — возвращаем локальный счётчик (сколько телепортаций к конфетам сделали)
-    return candyCollected
-end
-
 -- ========== ЛОГИКА ФАРМА ==========
-local function waitForRoundAndGoUnderMap()
-    -- Ждём, пока появится персонаж
-    while not getCharacter() do task.wait(0.5) end
-    -- Небольшая задержка, чтобы раунд успел инициализироваться
-    task.wait(WAIT_BEFORE_FARM)
-    -- Улетаем под карту
-    teleportTo(underMapPosition)
-end
-
 local function farmLoop()
     while farming do
         local char, hrp, hum = getCharacter()
@@ -222,38 +182,43 @@ local function farmLoop()
             continue
         end
 
-        -- Если мы не под картой — возвращаем под карту
-        if hrp.Position.Y > SAFE_Y + 100 then
-            teleportTo(underMapPosition)
-            task.wait(0.5)
+        -- Проверка на лобби (в MM2 лобби обычно называется "Lobby")
+        local isLobby = Workspace:FindFirstChild("Lobby") ~= nil
+        
+        if isLobby then
+            -- Если мы в лобби, просто ждем начала раунда, ничего не делаем
+            task.wait(1)
+            continue
         end
 
-        -- Ищем конфеты
+        -- Проверка заполнения мешка (50 конфет)
+        if candyCollected >= MAX_CANDY then
+            if hum then
+                hum.Health = 0 -- Авто-ресет
+            end
+            candyCollected = 0
+            task.wait(3) -- Ждем респавна
+            continue
+        end
+
+        -- Поиск и сбор конфет
         local candies = findCandies()
         if #candies > 0 then
             for _, candy in ipairs(candies) do
                 if not farming then break end
-                -- Телепортируемся чуть выше конфеты, чтобы задеть хитбоксом
-                local pos = candy.Position
-                teleportTo(pos)
-                candyCollected = candyCollected + 1
-                task.wait(FARM_SPEED)
+                
+                -- Проверяем, что мы все еще в игре, а не в лобби, и персонаж жив
+                if Workspace:FindFirstChild("Lobby") or not getCharacter() then break end
+                
+                if candy and candy.Parent then
+                    -- Телепортируемся прямо к конфете
+                    hrp.CFrame = CFrame.new(candy.Position + Vector3.new(0, 2, 0))
+                    candyCollected = candyCollected + 1
+                    task.wait(FARM_SPEED)
+                end
             end
         else
-            -- Конфет пока нет — просто висим под картой
-            teleportTo(underMapPosition)
-            task.wait(1)
-        end
-
-        -- Проверка заполнения мешка
-        local currentCount = getCandyCount()
-        if currentCount >= MAX_CANDY then
-            resetCharacter()
-            candyCollected = 0
-            task.wait(2) -- ждём респавна
-            if farming then
-                waitForRoundAndGoUnderMap()
-            end
+            task.wait(0.5)
         end
 
         task.wait(0.1)
@@ -263,15 +228,17 @@ end
 -- ========== ОБНОВЛЕНИЕ GUI ==========
 local function updateStats()
     if not statsVisible then return end
-    local elapsed = math.floor(tick() - farmStartTime)
+    -- Используем os.clock() для точного таймера
+    local elapsed = math.floor(os.clock() - farmStartTime)
     local mins = math.floor(elapsed / 60)
     local secs = elapsed % 60
     timerLabel.Text = string.format("Таймер: %02d:%02d", mins, secs)
     candyLabel.Text = "Конфет: " .. tostring(candyCollected)
 end
 
+-- Обновляем таймер каждый кадр, если открыто окно Stats
 RunService.RenderStepped:Connect(function()
-    if statsVisible and farming then
+    if statsVisible then
         updateStats()
     end
 end)
@@ -282,21 +249,13 @@ farmBtn.MouseButton1Click:Connect(function()
     if farming then
         farmBtn.Text = "Auto Farm: ON"
         farmBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
-        farmStartTime = tick()
+        farmStartTime = os.clock()
         candyCollected = 0
         -- Запускаем фарм в отдельном потоке
-        task.spawn(function()
-            waitForRoundAndGoUnderMap()
-            farmLoop()
-        end)
+        task.spawn(farmLoop)
     else
         farmBtn.Text = "Auto Farm: OFF"
         farmBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-        -- Возвращаем персонажа на поверхность (опционально)
-        local char, hrp, hum = getCharacter()
-        if hrp then
-            hrp.CFrame = CFrame.new(0, 50, 0) -- примерная безопасная точка на поверхности
-        end
     end
 end)
 
@@ -310,30 +269,4 @@ statsBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- Перетаскивание окна статистики (опционально)
-statsFrame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        local startPos = input.Position
-        local startFramePos = statsFrame.Position
-        local conn
-        conn = UserInputService.InputChanged:Connect(function(moveInput)
-            if moveInput.UserInputType == Enum.UserInputType.MouseMovement then
-                local delta = moveInput.Position - startPos
-                statsFrame.Position = UDim2.new(
-                    startFramePos.X.Scale,
-                    startFramePos.X.Offset + delta.X,
-                    startFramePos.Y.Scale,
-                    startFramePos.Y.Offset + delta.Y
-                )
-            end
-        end)
-        UserInputService.InputEnded:Connect(function(endInput)
-            if endInput.UserInputType == Enum.UserInputType.MouseButton1 then
-                if conn then conn:Disconnect() end
-            end
-        end)
-    end
-end)
-
--- Уведомление о загрузке
-print("[SWILL] MM2 Candy Farm загружен. Нажми 'Auto Farm: OFF' для старта.")
+print("[SWILL] MM2 Candy Farm (Fixed) загружен.")

@@ -1,5 +1,5 @@
 --[[
-    EasyAutoFarm by klx (V10 - Real Anti-Fling)
+    EasyAutoFarm by klx (V11 - Hotfix & Real Anti-Fling)
 ]]
 
 local Players = game:GetService("Players")
@@ -13,7 +13,7 @@ local CANDY_NAMES = {"candy", "sweet", "coin", "token", "collectible"}
 local MAX_CANDY = 50                
 local FLY_SPEED = 25                
 local SCAN_RADIUS = 150             
-local ANTI_FLING_SPEED_LIMIT = 150  -- Порог скорости, после которого срабатывает защита
+local ANTI_FLING_SPEED_LIMIT = 100  -- Порог скорости для анти-флинга
 -- ==============================
 
 local scriptStartTime = os.clock() 
@@ -31,7 +31,7 @@ screenGui.ResetOnSpawn = false
 screenGui.Parent = PlayerGui
 
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 220, 0, 170) 
+mainFrame.Size = UDim2.new(0, 220, 0, 180) -- Увеличили высоту для 3-х кнопок
 mainFrame.Position = UDim2.new(0, 20, 0, 20)
 mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 mainFrame.BorderSizePixel = 0
@@ -50,9 +50,10 @@ title.Font = Enum.Font.GothamBold
 title.Parent = mainFrame
 Instance.new("UICorner", title).CornerRadius = UDim.new(0, 8)
 
+-- Кнопка Auto Farm
 local farmBtn = Instance.new("TextButton")
 farmBtn.Size = UDim2.new(1, -20, 0, 30)
-farmBtn.Position = UDim2.new(0, 10, 0, 35)
+farmBtn.Position = UDim2.new(0, 10, 0, 40)
 farmBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
 farmBtn.BorderSizePixel = 0
 farmBtn.Text = "Auto Farm: OFF"
@@ -61,9 +62,10 @@ farmBtn.Font = Enum.Font.Gotham
 farmBtn.Parent = mainFrame
 Instance.new("UICorner", farmBtn).CornerRadius = UDim.new(0, 6)
 
+-- Кнопка Stats
 local statsBtn = Instance.new("TextButton")
 statsBtn.Size = UDim2.new(1, -20, 0, 30)
-statsBtn.Position = UDim2.new(0, 10, 0, 75)
+statsBtn.Position = UDim2.new(0, 10, 0, 80)
 statsBtn.BackgroundColor3 = Color3.fromRGB(50, 80, 200)
 statsBtn.BorderSizePixel = 0
 statsBtn.Text = "Stats: OFF"
@@ -72,9 +74,10 @@ statsBtn.Font = Enum.Font.Gotham
 statsBtn.Parent = mainFrame
 Instance.new("UICorner", statsBtn).CornerRadius = UDim.new(0, 6)
 
+-- Кнопка Anti-Fling
 local antiFlingBtn = Instance.new("TextButton")
 antiFlingBtn.Size = UDim2.new(1, -20, 0, 30)
-antiFlingBtn.Position = UDim2.new(0, 10, 0, 115)
+antiFlingBtn.Position = UDim2.new(0, 10, 0, 120)
 antiFlingBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
 antiFlingBtn.BorderSizePixel = 0
 antiFlingBtn.Text = "Anti-Fling: OFF"
@@ -83,6 +86,7 @@ antiFlingBtn.Font = Enum.Font.Gotham
 antiFlingBtn.Parent = mainFrame
 Instance.new("UICorner", antiFlingBtn).CornerRadius = UDim.new(0, 6)
 
+-- Окно статистики
 local statsFrame = Instance.new("Frame")
 statsFrame.Size = UDim2.new(0, 200, 0, 140) 
 statsFrame.Position = UDim2.new(0, 250, 0, 20)
@@ -134,44 +138,40 @@ footerLabel.Font = Enum.Font.Gotham
 footerLabel.TextSize = 11
 footerLabel.Parent = statsFrame
 
--- ========== REAL ANTI-FLING (Защита от читеров) ==========
+-- ========== ANTI-FLING & ANTI-VOID ==========
 RunService.Heartbeat:Connect(function()
-    if antiFlingEnabled and LocalPlayer.Character then
+    if LocalPlayer.Character then
         local char = LocalPlayer.Character
         local hrp = char:FindFirstChild("HumanoidRootPart")
         local hum = char:FindFirstChildOfClass("Humanoid")
         
         if hrp and hum and hum.Health > 0 then
-            -- 1. Сброс аномальной скорости (если кто-то применил флинг)
-            if hrp.AssemblyLinearVelocity.Magnitude > ANTI_FLING_SPEED_LIMIT or hrp.AssemblyAngularVelocity.Magnitude > 50 then
-                hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-                hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-                -- Возвращаем на последнюю безопасную позицию при сильном флинге
-                if lastSafePosition and not farming then
-                    hrp.CFrame = lastSafePosition
-                end
+            -- Запоминаем безопасную позицию, если мы стоим на земле
+            if not farming and hrp.AssemblyLinearVelocity.Magnitude < 10 and hrp.Position.Y > -50 then
+                lastSafePosition = hrp.CFrame
             end
 
-            -- 2. Защита от изменения свойств физики (эксплойты часто ломают CanCollide)
-            if not farming then
-                -- Если мы не летим сами, принудительно возвращаем коллизию и выключаем платформу
-                if not hrp.CanCollide then hrp.CanCollide = true end
-                if hum.PlatformStand then hum.PlatformStand = false end
+            if antiFlingEnabled then
+                -- 1. Сброс аномальной скорости (флинг)
+                if hrp.AssemblyLinearVelocity.Magnitude > ANTI_FLING_SPEED_LIMIT or hrp.AssemblyAngularVelocity.Magnitude > 50 then
+                    hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                    hrp.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                end
+
+                -- 2. Anti-Void (защита от падения под карту)
+                if hrp.Position.Y < -50 then
+                    if lastSafePosition then
+                        hrp.CFrame = lastSafePosition
+                    else
+                        hrp.CFrame = CFrame.new(0, 50, 0) 
+                    end
+                    hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                end
                 
-                -- Запоминаем безопасную позицию, если мы не в полете и не падаем
-                if hrp.Position.Y > -50 and hrp.AssemblyLinearVelocity.Magnitude < 10 then
-                    lastSafePosition = hrp.CFrame
+                -- 3. Защита от сброса PlatformStand (читер пытается поставить тебя на платформу)
+                if hum.PlatformStand and not farming then
+                    hum.PlatformStand = false
                 end
-            end
-
-            -- 3. Anti-Void (защита от падения под карту)
-            if hrp.Position.Y < -50 then
-                if lastSafePosition then
-                    hrp.CFrame = lastSafePosition
-                else
-                    hrp.CFrame = CFrame.new(0, 50, 0) 
-                end
-                hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
             end
         end
     end
@@ -225,15 +225,16 @@ local function getClosestCandy(hrp)
     return closestCandy
 end
 
--- Функция полета с временным отключением коллизии
 local function flyToPart(targetPart)
     local char, hrp, hum = getCharacter()
     if not hrp or not targetPart or not targetPart.Parent then return false end
     
-    -- Включаем Noclip и отключаем гравитацию ТОЛЬКО на время полета
+    -- Включаем Noclip и отключаем гравитацию (ТОЛЬКО ТЕЛО, HRP НЕ ТРОГАЕМ)
     hum.PlatformStand = true
     for _, v in pairs(char:GetDescendants()) do
-        if v:IsA("BasePart") then v.CanCollide = false end
+        if v:IsA("BasePart") and v.Name ~= "HumanoidRootPart" then 
+            v.CanCollide = false 
+        end
     end
 
     local startTime = tick()
@@ -251,12 +252,14 @@ local function flyToPart(targetPart)
         RunService.Heartbeat:Wait()
     end
     
-    -- Возвращаем физику обратно после подлета (или если прервались)
+    -- Возвращаем физику обратно
     if hrp then
         hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
         hum.PlatformStand = false
         for _, v in pairs(char:GetDescendants()) do
-            if v:IsA("BasePart") then v.CanCollide = true end
+            if v:IsA("BasePart") and v.Name ~= "HumanoidRootPart" then 
+                v.CanCollide = true 
+            end
         end
     end
     
@@ -330,12 +333,13 @@ farmBtn.MouseButton1Click:Connect(function()
         farmBtn.Text = "Auto Farm: OFF"
         farmBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
         
-        -- Принудительно возвращаем физику при выключении
         if LocalPlayer.Character then
             local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
             if hum then hum.PlatformStand = false end
             for _, v in pairs(LocalPlayer.Character:GetDescendants()) do
-                if v:IsA("BasePart") then v.CanCollide = true end
+                if v:IsA("BasePart") and v.Name ~= "HumanoidRootPart" then 
+                    v.CanCollide = true 
+                end
             end
         end
     end
@@ -353,3 +357,5 @@ antiFlingBtn.MouseButton1Click:Connect(function()
     antiFlingBtn.Text = "Anti-Fling: " .. (antiFlingEnabled and "ON" or "OFF")
     antiFlingBtn.BackgroundColor3 = antiFlingEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(100, 100, 100)
 end)
+
+print("[SWILL] GUI загружено. Кнопки: Farm, Stats, Anti-Fling.")

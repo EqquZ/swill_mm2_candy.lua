@@ -1,20 +1,18 @@
 --[[
-    SWILL MM2 Candy AutoFarm (V7 - Noclip & Radius)
+    SWILL MM2 Candy AutoFarm (V8 - Smooth Flight & Anti-Cheat Safe)
 ]]
 
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 -- ========== НАСТРОЙКИ ==========
 local CANDY_NAMES = {"candy", "sweet", "coin", "token", "collectible"} 
 local MAX_CANDY = 50                
-local FLY_SPEED = 25                -- Скорость полета (повышена до 25)
-local SCAN_RADIUS = 300             -- Радиус поиска конфет (чтобы не летать через всю карту)
-local USE_NOCLIP = true             -- Отключение коллизий для плавного полета
+local FLY_SPEED = 25                -- Скорость полета
+local SCAN_RADIUS = 150             -- Радиус поиска (150 стадов - это очень близко, исключает полеты через всю карту)
 -- ==============================
 
 local scriptStartTime = os.clock() 
@@ -23,10 +21,14 @@ local statsVisible = false
 local localCandyCount = 0
 local totalCollected = 0            
 
--- ========== NOCLIP ==========
--- Отключает столкновения с объектами во время полета, чтобы персонаж не застревал в стенах
+-- ========== NOCLIP & GRAVITY OFF ==========
 RunService.Stepped:Connect(function()
-    if USE_NOCLIP and farming and LocalPlayer.Character then
+    if farming and LocalPlayer.Character then
+        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum then
+            -- PlatformStand отключает анимации ходьбы и гравитацию, персонаж не трясется
+            hum.PlatformStand = true 
+        end
         for _, v in pairs(LocalPlayer.Character:GetDescendants()) do
             if v:IsA("BasePart") then
                 v.CanCollide = false
@@ -157,47 +159,62 @@ local function getRealCandyCount()
     return localCandyCount
 end
 
-local function findCandies()
-    local candies = {}
-    local char = LocalPlayer.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return candies end
-    local playerPos = char.HumanoidRootPart.Position
+-- Возвращает ОДНУ самую ближайшую конфету
+local function getClosestCandy(hrp)
+    local closestCandy = nil
+    local shortestDistance = SCAN_RADIUS 
 
     for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            if obj.Transparency < 1 then
-                local nameLower = obj.Name:lower()
-                for _, target in ipairs(CANDY_NAMES) do
-                    if nameLower:find(target) then
-                        -- Ограничиваем радиус поиска, чтобы не летать через всю карту
-                        if (playerPos - obj.Position).Magnitude <= SCAN_RADIUS then
-                            table.insert(candies, obj)
+        if obj:IsA("BasePart") and obj.Transparency < 1 then
+            local nameLower = obj.Name:lower()
+            for _, target in ipairs(CANDY_NAMES) do
+                if nameLower:find(target) then
+                    -- 1. Фильтр по высоте (чтобы не лететь в небо за фейком)
+                    local yDiff = math.abs(hrp.Position.Y - obj.Position.Y)
+                    if yDiff <= 50 then
+                        -- 2. Фильтр по дистанции
+                        local dist = (hrp.Position - obj.Position).Magnitude
+                        if dist < shortestDistance then
+                            shortestDistance = dist
+                            closestCandy = obj
                         end
-                        break
                     end
+                    break
                 end
             end
         end
     end
-    return candies
+    return closestCandy
 end
 
 local function flyToPart(targetPart)
     local char, hrp, hum = getCharacter()
     if not hrp or not targetPart or not targetPart.Parent then return false end
     
-    local targetPos = targetPart.Position 
-    local distance = (hrp.Position - targetPos).Magnitude
-    local timeToFly = distance / FLY_SPEED
-    if timeToFly < 0.15 then timeToFly = 0.15 end
+    -- Плавное движение через Velocity (античит это любит больше, чем CFrame)
+    local startTime = tick()
+    while farming and targetPart and targetPart.Parent do
+        local currentChar, currentHrp = getCharacter()
+        if not currentHrp then break end
+        
+        local distance = (currentHrp.Position - targetPart.Position).Magnitude
+        if distance < 3 then break end -- Долетели
+        
+        local direction = (targetPart.Position - currentHrp.Position).Unit
+        -- Задаем скорость напрямую (имитация полета)
+        currentHrp.AssemblyLinearVelocity = direction * FLY_SPEED
+        
+        -- Если летим слишком долго (застряли), прерываем
+        if tick() - startTime > 3 then break end
+        
+        RunService.Heartbeat:Wait()
+    end
     
-    local tweenInfo = TweenInfo.new(timeToFly, Enum.EasingStyle.Linear)
-    local tween = TweenService:Create(hrp, tweenInfo, {CFrame = CFrame.new(targetPos)})
-    
-    tween:Play()
-    tween.Completed:Wait()
-    
-    task.wait(0.05)
+    -- Останавливаемся после подлета
+    if hrp then
+        hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+    end
+    task.wait(0.1)
     return true
 end
 
@@ -230,26 +247,16 @@ local function farmLoop()
             continue
         end
 
-        local candies = findCandies()
+        -- Ищем САМУЮ БЛИЖАЙШУЮ конфету (только одну)
+        local candy = getClosestCandy(hrp)
         
-        if #candies > 0 then
-            table.sort(candies, function(a, b)
-                return (hrp.Position - a.Position).Magnitude < (hrp.Position - b.Position).Magnitude
-            end)
-
-            for _, candy in ipairs(candies) do
-                if not farming then break end
-                if not getCharacter() then break end 
-                if getRealCandyCount() >= MAX_CANDY or localCandyCount >= MAX_CANDY then break end
-
-                if candy and candy.Parent then
-                    flyToPart(candy)
-                    localCandyCount = localCandyCount + 1
-                    totalCollected = totalCollected + 1 
-                end
-            end
+        if candy then
+            flyToPart(candy)
+            localCandyCount = localCandyCount + 1
+            totalCollected = totalCollected + 1 
         else
-            -- Если конфет в радиусе нет, ждем (не летим через всю карту)
+            -- Если в радиусе 150 стадов нет конфет, ждем
+            hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
             task.wait(0.5)
         end
     end
@@ -279,8 +286,11 @@ farmBtn.MouseButton1Click:Connect(function()
     else
         farmBtn.Text = "Auto Farm: OFF"
         farmBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-        -- При выключении возвращаем коллизии, чтобы персонаж не провалился под карту
+        
+        -- Возвращаем физику персонажу при выключении
         if LocalPlayer.Character then
+            local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if hum then hum.PlatformStand = false end
             for _, v in pairs(LocalPlayer.Character:GetDescendants()) do
                 if v:IsA("BasePart") then v.CanCollide = true end
             end

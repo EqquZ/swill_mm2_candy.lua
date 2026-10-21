@@ -1,5 +1,5 @@
 --[[
-    SWILL MM2 Candy AutoFarm (V6 - Optimized & GUI Update)
+    SWILL MM2 Candy AutoFarm (V7 - Noclip & Radius)
 ]]
 
 local Players = game:GetService("Players")
@@ -12,15 +12,28 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 -- ========== НАСТРОЙКИ ==========
 local CANDY_NAMES = {"candy", "sweet", "coin", "token", "collectible"} 
 local MAX_CANDY = 50                
-local FLY_SPEED = 21                
-local MAX_DISTANCE = 800            -- Игнорируем объекты дальше этого расстояния (отсекает лобби)
+local FLY_SPEED = 25                -- Скорость полета (повышена до 25)
+local SCAN_RADIUS = 300             -- Радиус поиска конфет (чтобы не летать через всю карту)
+local USE_NOCLIP = true             -- Отключение коллизий для плавного полета
 -- ==============================
 
 local scriptStartTime = os.clock() 
 local farming = false
 local statsVisible = false
 local localCandyCount = 0
-local totalCollected = 0            -- Счетчик за все время
+local totalCollected = 0            
+
+-- ========== NOCLIP ==========
+-- Отключает столкновения с объектами во время полета, чтобы персонаж не застревал в стенах
+RunService.Stepped:Connect(function()
+    if USE_NOCLIP and farming and LocalPlayer.Character then
+        for _, v in pairs(LocalPlayer.Character:GetDescendants()) do
+            if v:IsA("BasePart") then
+                v.CanCollide = false
+            end
+        end
+    end
+end)
 
 -- ========== GUI ==========
 local screenGui = Instance.new("ScreenGui")
@@ -28,7 +41,6 @@ screenGui.Name = "SWILL_CandyFarm"
 screenGui.ResetOnSpawn = false
 screenGui.Parent = PlayerGui
 
--- Главное окно
 local mainFrame = Instance.new("Frame")
 mainFrame.Size = UDim2.new(0, 220, 0, 130)
 mainFrame.Position = UDim2.new(0, 20, 0, 20)
@@ -43,7 +55,7 @@ local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, 0, 0, 30)
 title.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
 title.BorderSizePixel = 0
-title.Text = "EasyAutoFarm" -- Изменено название
+title.Text = "EasyAutoFarm" 
 title.TextColor3 = Color3.fromRGB(255, 255, 255)
 title.Font = Enum.Font.GothamBold
 title.Parent = mainFrame
@@ -71,9 +83,8 @@ statsBtn.Font = Enum.Font.Gotham
 statsBtn.Parent = mainFrame
 Instance.new("UICorner", statsBtn).CornerRadius = UDim.new(0, 6)
 
--- Окно статистики
 local statsFrame = Instance.new("Frame")
-statsFrame.Size = UDim2.new(0, 200, 0, 140) -- Увеличили высоту для новых строк
+statsFrame.Size = UDim2.new(0, 200, 0, 140) 
 statsFrame.Position = UDim2.new(0, 250, 0, 20)
 statsFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
 statsFrame.BorderSizePixel = 0
@@ -154,13 +165,12 @@ local function findCandies()
 
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if obj:IsA("BasePart") then
-            -- Фильтр фантомных монет: они обычно невидимые (Transparency = 1)
             if obj.Transparency < 1 then
                 local nameLower = obj.Name:lower()
                 for _, target in ipairs(CANDY_NAMES) do
                     if nameLower:find(target) then
-                        -- Проверка на расстояние: если объект далеко (в лобби), не берем его
-                        if (playerPos - obj.Position).Magnitude <= MAX_DISTANCE then
+                        -- Ограничиваем радиус поиска, чтобы не летать через всю карту
+                        if (playerPos - obj.Position).Magnitude <= SCAN_RADIUS then
                             table.insert(candies, obj)
                         end
                         break
@@ -172,7 +182,6 @@ local function findCandies()
     return candies
 end
 
--- Плавный полет ровно в координаты конфеты (без оффсета)
 local function flyToPart(targetPart)
     local char, hrp, hum = getCharacter()
     if not hrp or not targetPart or not targetPart.Parent then return false end
@@ -204,7 +213,6 @@ local function farmLoop()
             continue
         end
 
-        -- Оптимизация: подключаем событие смерти только один раз при смене персонажа
         if hum ~= lastHum then
             if diedConnection then diedConnection:Disconnect() end
             lastHum = hum
@@ -237,11 +245,11 @@ local function farmLoop()
                 if candy and candy.Parent then
                     flyToPart(candy)
                     localCandyCount = localCandyCount + 1
-                    totalCollected = totalCollected + 1 -- Увеличиваем общий счетчик
+                    totalCollected = totalCollected + 1 
                 end
             end
         else
-            -- Если конфет рядом нет (лобби), спим чуть дольше для оптимизации
+            -- Если конфет в радиусе нет, ждем (не летим через всю карту)
             task.wait(0.5)
         end
     end
@@ -271,6 +279,12 @@ farmBtn.MouseButton1Click:Connect(function()
     else
         farmBtn.Text = "Auto Farm: OFF"
         farmBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+        -- При выключении возвращаем коллизии, чтобы персонаж не провалился под карту
+        if LocalPlayer.Character then
+            for _, v in pairs(LocalPlayer.Character:GetDescendants()) do
+                if v:IsA("BasePart") then v.CanCollide = true end
+            end
+        end
     end
 end)
 

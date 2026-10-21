@@ -1,5 +1,5 @@
 --[[
-    EasyAutoFarm by klx (V15 - Guaranteed Collection & Snap)
+    EasyAutoFarm by klx (V16 - True Fly-Through Collection)
 ]]
 
 local Players = game:GetService("Players")
@@ -12,7 +12,7 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 local CANDY_NAMES = {"candy", "sweet", "coin", "token", "collectible"} 
 local MAX_CANDY = 50                
 local FLY_SPEED = 25                
-local SCAN_RADIUS = 300             -- Увеличил радиус, чтобы видел больше конфет
+local SCAN_RADIUS = 300             
 local ANTI_FLING_SPEED_LIMIT = 100  
 -- ==============================
 
@@ -206,7 +206,6 @@ local function getRealCandyCount()
     return localCandyCount
 end
 
--- Поиск строго самой ближайшей конфеты
 local function getClosestCandy(hrp)
     local closestCandy = nil
     local shortestDistance = SCAN_RADIUS 
@@ -237,24 +236,29 @@ local function flyToPart(targetPart)
     hum.PlatformStand = true
 
     local startTime = tick()
+    
     while farming and targetPart and targetPart.Parent do
         local currentChar, currentHrp = getCharacter()
         if not currentHrp then break end
         
-        local distance = (currentHrp.Position - targetPart.Position).Magnitude
+        -- Вычисляем позицию чуть выше центра конфеты, чтобы персонаж не врезался в пол
+        local targetPos = targetPart.Position + Vector3.new(0, 1.5, 0)
+        local distance = (currentHrp.Position - targetPos).Magnitude
         
-        -- Если мы подлетели близко, СНАПИМ позицию прямо в конфету для 100% сбора
-        if distance < 5 then
-            currentHrp.CFrame = CFrame.new(targetPart.Position)
-            task.wait(0.1) -- Даем серверу время засчитать сбор
+        -- Если мы уже вплотную к конфете (меньше 1.5 стадов)
+        if distance < 1.5 then
+            -- Жестко ставим персонажа ровно на конфету
+            currentHrp.CFrame = CFrame.new(targetPos)
+            task.wait(0.1) -- Ждем, пока сервер засчитает сбор (конфета исчезнет)
             break 
         end
         
-        local direction = (targetPart.Position - currentHrp.Position).Unit
+        -- Летим к цели
+        local direction = (targetPos - currentHrp.Position).Unit
         currentHrp.CFrame = currentHrp.CFrame + (direction * FLY_SPEED * RunService.Heartbeat:Wait())
         
-        -- Увеличил таймаут до 10 секунд, чтобы он точно долетал
-        if tick() - startTime > 10 then break end 
+        -- Если летим больше 5 секунд (застряли), прерываем
+        if tick() - startTime > 5 then break end 
     end
     
     if hrp then
@@ -364,4 +368,4 @@ autoResetBtn.MouseButton1Click:Connect(function()
     autoResetBtn.BackgroundColor3 = autoResetEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(100, 100, 100)
 end)
 
-print("[SWILL] V15 загружено. Snap-in Collection ready.")
+print("[SWILL] V16 загружено. Fix: Fly-Through.")

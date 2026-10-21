@@ -1,5 +1,5 @@
 --[[
-    EasyAutoFarm by klx (V13 - True Noclip & CFrame Flight)
+    EasyAutoFarm by klx (V14 - Classic Noclip only on Fly)
 ]]
 
 local Players = game:GetService("Players")
@@ -25,6 +25,42 @@ local localCandyCount = 0
 local totalCollected = 0            
 local lastSafePosition = nil
 local candyCooldowns = {}           
+
+-- Переменная для соединения Noclip
+local noclipConnection = nil
+
+-- ========== КЛАССИЧЕСКИЙ NOCLIP ==========
+local function enableNoclip()
+    if noclipConnection then return end
+    noclipConnection = RunService.Stepped:Connect(function()
+        if LocalPlayer.Character then
+            for _, v in pairs(LocalPlayer.Character:GetDescendants()) do
+                if v:IsA("BasePart") then
+                    v.CanCollide = false
+                end
+            end
+        end
+    end)
+end
+
+local function disableNoclip()
+    if noclipConnection then
+        noclipConnection:Disconnect()
+        noclipConnection = nil
+    end
+    -- Возвращаем коллизию, КРОМЕ HumanoidRootPart
+    if LocalPlayer.Character then
+        for _, v in pairs(LocalPlayer.Character:GetDescendants()) do
+            if v:IsA("BasePart") then
+                if v.Name == "HumanoidRootPart" then
+                    v.CanCollide = false
+                else
+                    v.CanCollide = true
+                end
+            end
+        end
+    end
+end
 
 -- ========== GUI ==========
 local screenGui = Instance.new("ScreenGui")
@@ -123,26 +159,7 @@ footerLabel.Font = Enum.Font.Gotham
 footerLabel.TextSize = 11
 footerLabel.Parent = statsFrame
 
--- ========== ПОСТОЯННЫЙ NOCLIP ==========
--- Работает каждый кадр, пока включен автофарм, и отключает коллизии у всех частей
-RunService.Stepped:Connect(function()
-    if farming and LocalPlayer.Character then
-        local char = LocalPlayer.Character
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum then
-            hum.PlatformStand = true
-        end
-        for _, v in pairs(char:GetDescendants()) do
-            if v:IsA("BasePart") then
-                v.CanCollide = false
-                -- Пытаемся забрать сетевой контроль (может не сработать в некоторых играх)
-                pcall(function() v:SetNetworkOwner(LocalPlayer) end)
-            end
-        end
-    end
-end)
-
--- ========== ANTI-FLING & ANTI-VOID ==========
+-- ========== ANTI-FLING ==========
 RunService.Heartbeat:Connect(function()
     if LocalPlayer.Character then
         local char = LocalPlayer.Character
@@ -163,10 +180,6 @@ RunService.Heartbeat:Connect(function()
                 if hrp.Position.Y < -50 then
                     if lastSafePosition then hrp.CFrame = lastSafePosition else hrp.CFrame = CFrame.new(0, 50, 0) end
                     hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-                end
-                
-                if hum.PlatformStand and not farming then
-                    hum.PlatformStand = false
                 end
             end
         end
@@ -224,14 +237,15 @@ local function getClosestCandy(hrp)
     return closestCandy
 end
 
--- НОВЫЙ ПОЛЕТ: Прямое изменение CFrame каждый кадр
 local function flyToPart(targetPart)
     local char, hrp, hum = getCharacter()
     if not hrp or not targetPart or not targetPart.Parent then return false end
     
+    -- ВКЛЮЧАЕМ NOCLIP СТРОГО НА ВРЕМЯ ПОЛЕТА
+    enableNoclip()
+    hum.PlatformStand = true
+
     local startTime = tick()
-    local lastHeartbeat = tick()
-    
     while farming and targetPart and targetPart.Parent do
         local currentChar, currentHrp = getCharacter()
         if not currentHrp then break end
@@ -241,23 +255,18 @@ local function flyToPart(targetPart)
         
         local direction = (targetPart.Position - currentHrp.Position).Unit
         
-        -- Вычисляем время с последнего кадра
-        local now = tick()
-        local dt = now - lastHeartbeat
-        lastHeartbeat = now
-        
-        -- Двигаем персонажа на расстояние = скорость * время
-        local moveStep = direction * FLY_SPEED * dt
-        currentHrp.CFrame = currentHrp.CFrame + moveStep
+        -- Двигаем персонажа напрямую через CFrame
+        currentHrp.CFrame = currentHrp.CFrame + (direction * FLY_SPEED * RunService.Heartbeat:Wait())
         
         if tick() - startTime > 3 then break end
-        RunService.Heartbeat:Wait()
     end
     
-    -- Останавливаемся
+    -- ВЫКЛЮЧАЕМ NOCLIP ПОСЛЕ ПОЛЕТА
     if hrp then
         hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
     end
+    hum.PlatformStand = false
+    disableNoclip()
     
     task.wait(0.1)
     return true
@@ -340,20 +349,11 @@ farmBtn.MouseButton1Click:Connect(function()
         farmBtn.Text = "Auto Farm: OFF"
         farmBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
         
-        -- Возвращаем физику при выключении
+        -- Принудительно выключаем Noclip и возвращаем физику
+        disableNoclip()
         if LocalPlayer.Character then
-            local char = LocalPlayer.Character
-            local hum = char:FindFirstChildOfClass("Humanoid")
+            local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
             if hum then hum.PlatformStand = false end
-            for _, v in pairs(char:GetDescendants()) do
-                if v:IsA("BasePart") then 
-                    if v.Name == "HumanoidRootPart" then 
-                        v.CanCollide = false 
-                    else 
-                        v.CanCollide = true 
-                    end
-                end
-            end
         end
     end
 end)
@@ -377,4 +377,4 @@ autoResetBtn.MouseButton1Click:Connect(function()
     autoResetBtn.BackgroundColor3 = autoResetEnabled and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(100, 100, 100)
 end)
 
-print("[SWILL] V13 загружено. Полный Noclip.")
+print("[SWILL] V14 загружено. Noclip только во время полета.")
